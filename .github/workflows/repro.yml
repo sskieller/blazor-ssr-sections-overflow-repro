@@ -103,7 +103,7 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "rounds=\`$REPRO_ROUNDS\` iterations=\`$REPRO_ITERATIONS\` parallelism=\`$REPRO_PARALLELISM\` taskset=\`$REPRO_CPUS\` runner_cores=\`$(nproc)\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "requests per round: \`$((REPRO_ITERATIONS * 5))\` across 5 routes" >> "$GITHUB_STEP_SUMMARY"
+          echo "requests per round: \`$((REPRO_ITERATIONS * 6))\` across 6 routes" >> "$GITHUB_STEP_SUMMARY"
 
       # Fail the job when it reproduced, so a hit is visible straight from the run list.
       - name: Fail the shard when reproduced

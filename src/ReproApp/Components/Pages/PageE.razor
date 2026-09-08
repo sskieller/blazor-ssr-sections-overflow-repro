@@ -1,0 +1,27 @@
+@page "/page-e"
+
+@* NON-streaming static SSR: the whole render is one synchronous walk that starts only once
+   the awaits below have completed. It then swaps BOTH of HeadOutlet's outlets late — the
+   title section via PageTitle and the head-content section via HeadContent (the public
+   SectionContent for HeadOutlet's second SectionOutlet). Two outlets, two content renderers,
+   both replaced from a continuation. *@
+@if (_ready)
+{
+    <PageTitle>Page E</PageTitle>
+    <HeadContent>
+        <meta name="repro-page" content="page-e" />
+    </HeadContent>
+}
+
+<h1>Page E</h1>
+<p>Static SSR, both head outlets swapped after an await.</p>
+
+@code {
+    private bool _ready;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Task.Delay(Random.Shared.Next(1, 6));
+        _ready = true;
+    }
+}

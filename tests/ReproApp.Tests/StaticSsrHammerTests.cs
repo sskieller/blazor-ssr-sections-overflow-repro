@@ -20,7 +20,7 @@ namespace ReproApp.Tests;
 /// </summary>
 public sealed class StaticSsrHammerTests : IClassFixture<WebApplicationFactory<Program>>
 {
-    private static readonly string[] Routes = ["/", "/page-a", "/page-b", "/page-c", "/page-d"];
+    private static readonly string[] Routes = ["/", "/page-a", "/page-b", "/page-c", "/page-d", "/page-e"];
 
     private static readonly Stream StdOut = Console.OpenStandardOutput();
 

@@ -1,8 +1,23 @@
 @page "/page-a"
 
-@* Static SSR page WITH its own PageTitle: the second section registration for the same
-   HeadOutlet section, replacing the layout's, while the HTML walk is running. *@
-<PageTitle>Page A</PageTitle>
+@* Static SSR page with its own PageTitle, registered from its own continuation: a SECOND
+   registration for the same HeadOutlet section, from a second pending task, replacing the
+   layout's. Two continuations landing on one section while the walk is in flight. *@
+@if (_ready)
+{
+    <PageTitle>Page A</PageTitle>
+}
 
 <h1>Page A</h1>
-<p>Static SSR, own PageTitle.</p>
+<p>Static SSR, own PageTitle, registered after an await.</p>
+
+@code {
+    private bool _ready;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Task.Yield();
+        await Task.Delay(Random.Shared.Next(0, 3));
+        _ready = true;
+    }
+}

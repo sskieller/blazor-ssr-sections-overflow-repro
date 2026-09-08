@@ -4,7 +4,9 @@ namespace ReproApp.Tests;
 
 /// <summary>
 /// Proves the repro really has the tree the dumps show, so a green hammer run cannot be green
-/// because the app quietly stopped doing the interesting thing.
+/// because the app quietly stopped doing the interesting thing. Every title asserted here is
+/// registered from a CONTINUATION (the layout, the auth state provider and every page await
+/// before they render), so a correct title is also proof the async paths ran.
 /// </summary>
 public sealed class TreeShapeTests : IClassFixture<WebApplicationFactory<Program>>
 {
@@ -61,5 +63,31 @@ public sealed class TreeShapeTests : IClassFixture<WebApplicationFactory<Program
         Assert.Contains("<title>Page D loaded</title>", html);
         Assert.DoesNotContain("<title>Loading...</title>", html);
         Assert.DoesNotContain("<title>Repro</title>", html);
+    }
+
+    [Fact]
+    public async Task Page_e_swaps_both_head_outlets_from_a_continuation()
+    {
+        using var client = _factory.CreateClient();
+        var html = await client.GetStringAsync("/page-e", TestContext.Current.CancellationToken);
+
+        // The title outlet took the page's late registration...
+        Assert.Contains("<title>Page E</title>", html);
+        Assert.DoesNotContain("<title>Repro</title>", html);
+        // ...and so did HeadOutlet's second outlet, the head-content section.
+        Assert.Contains("name=\"repro-page\"", html);
+        // Non-streaming: the whole document arrived in one walk, no streamed patch needed.
+        Assert.DoesNotContain("blazor-ssr", html);
+    }
+
+    [Fact]
+    public async Task Home_shows_the_layouts_awaited_title()
+    {
+        using var client = _factory.CreateClient();
+        var html = await client.GetStringAsync("/", TestContext.Current.CancellationToken);
+
+        // The layout registers its PageTitle only after its own await; seeing it here proves
+        // the renderer waited for that pending task before writing the HTML.
+        Assert.Contains("<title>Repro</title>", html);
     }
 }

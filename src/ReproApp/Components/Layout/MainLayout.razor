@@ -1,10 +1,26 @@
 @inherits LayoutComponentBase
 
 @* Exactly ONE layout-level PageTitle — dump 2's tree had a single layout PageTitle and still
-   raced the walk, so the repro keeps the hoisted-to-the-layout shape rather than the
-   many-swaps shape. *@
-<PageTitle>Repro</PageTitle>
+   raced the walk — but it is registered from a CONTINUATION, not from the first synchronous
+   pass. The layout awaits before it renders, so its section registration lands while the
+   renderer is resolving pending tasks, which is where the crash stack enters the walk
+   (WaitForResultReady / WaitForNonStreamingPendingTasks). *@
+@if (_ready)
+{
+    <PageTitle>Repro</PageTitle>
+}
 
 <main>
     @Body
 </main>
+
+@code {
+    private bool _ready;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Task.Yield();
+        await Task.Delay(Random.Shared.Next(0, 3));
+        _ready = true;
+    }
+}

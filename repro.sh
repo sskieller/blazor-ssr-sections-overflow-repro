@@ -43,7 +43,7 @@ else
 fi
 
 echo "== rounds=$ROUNDS iterations=$ITERATIONS parallelism=$PARALLELISM cpus=$CPUS configuration=$CONFIGURATION"
-echo "== each round issues $((ITERATIONS * 5)) requests across 5 routes; the hammer prints its own"
+echo "== each round issues $((ITERATIONS * 6)) requests across 6 routes; the hammer prints its own"
 echo "== effective config and wall time, so the log proves the load that actually ran."
 
 dotnet build -c "$CONFIGURATION" || exit $?
