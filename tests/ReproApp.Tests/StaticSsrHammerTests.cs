@@ -1,11 +1,13 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
+using System.Text;
 using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace ReproApp.Tests;
 
 /// <summary>
-/// Hammers the three static-SSR entry points through an in-memory host, the way the real app's
+/// Hammers the static-SSR entry points through an in-memory host, the way the real app's
 /// WebApplicationFactory integration suite does. The bug being chased
 /// (https://github.com/dotnet/aspnetcore/issues/69035) is a race between a section
 /// registration (HeadOutlet / PageTitle) and EndpointHtmlRenderer.WriteComponentHtml's
@@ -18,7 +20,9 @@ namespace ReproApp.Tests;
 /// </summary>
 public sealed class StaticSsrHammerTests : IClassFixture<WebApplicationFactory<Program>>
 {
-    private static readonly string[] Routes = ["/", "/page-a", "/page-b"];
+    private static readonly string[] Routes = ["/", "/page-a", "/page-b", "/page-c", "/page-d"];
+
+    private static readonly Stream StdOut = Console.OpenStandardOutput();
 
     private readonly WebApplicationFactory<Program> _factory;
 
@@ -33,26 +37,41 @@ public sealed class StaticSsrHammerTests : IClassFixture<WebApplicationFactory<P
     {
         var iterations = Iterations;
         var parallelism = Parallelism;
+        var total = iterations * Routes.Length;
+
+        Emit($"HAMMER config: REPRO_ITERATIONS={Describe("REPRO_ITERATIONS", iterations)} "
+            + $"REPRO_PARALLELISM={Describe("REPRO_PARALLELISM", parallelism)} "
+            + $"routes={Routes.Length} ({string.Join(' ', Routes)}) "
+            + $"total_requests={total} processors={Environment.ProcessorCount}");
 
         using var client = _factory.CreateClient();
         using var gate = new SemaphoreSlim(parallelism, parallelism);
 
         var failures = new ConcurrentBag<string>();
-        var work = new List<Task>(iterations * Routes.Length);
+        var completed = 0;
+        var work = new List<Task>(total);
+        var stopwatch = Stopwatch.StartNew();
 
         for (var i = 0; i < iterations; i++)
         {
             foreach (var route in Routes)
             {
-                work.Add(RequestAsync(client, gate, route, failures));
+                work.Add(RequestAsync(client, gate, route, failures, () => Interlocked.Increment(ref completed)));
             }
         }
 
         await Task.WhenAll(work);
+        stopwatch.Stop();
 
+        var done = Volatile.Read(ref completed);
+        var perSecond = done / Math.Max(stopwatch.Elapsed.TotalSeconds, 0.001);
+        Emit($"HAMMER done: requests={done}/{total} failures={failures.Count} "
+            + $"wall={stopwatch.Elapsed.TotalSeconds:F2}s rate={perSecond:F0} req/s");
+
+        Assert.Equal(total, done);
         Assert.True(
             failures.IsEmpty,
-            $"{failures.Count} of {iterations * Routes.Length} requests did not return 200:{Environment.NewLine}"
+            $"{failures.Count} of {total} requests did not return 200:{Environment.NewLine}"
             + string.Join(Environment.NewLine, failures.Take(20)));
     }
 
@@ -60,14 +79,16 @@ public sealed class StaticSsrHammerTests : IClassFixture<WebApplicationFactory<P
         HttpClient client,
         SemaphoreSlim gate,
         string route,
-        ConcurrentBag<string> failures)
+        ConcurrentBag<string> failures,
+        Action onCompleted)
     {
         await gate.WaitAsync();
         try
         {
             using var response = await client.GetAsync(route);
             // Drain the body: the static-SSR HTML walk that overflows runs while the response
-            // is being written, so a request whose body is never read may never reach it.
+            // is being written, and /page-c streams, so a request whose body is never read may
+            // never reach the second walk at all.
             var body = await response.Content.ReadAsStringAsync();
 
             if (response.StatusCode != HttpStatusCode.OK)
@@ -85,7 +106,40 @@ public sealed class StaticSsrHammerTests : IClassFixture<WebApplicationFactory<P
         }
         finally
         {
+            onCompleted();
             gate.Release();
+        }
+    }
+
+    private static string Describe(string name, int effective)
+    {
+        var raw = Environment.GetEnvironmentVariable(name);
+        return string.IsNullOrEmpty(raw)
+            ? $"{effective} (unset, default)"
+            : $"{effective} (env \"{raw}\")";
+    }
+
+    /// <summary>
+    /// Writes straight to the process's standard output handle. The runner replaces
+    /// <see cref="Console.Out"/> to capture per-test output, and that capture has been known to
+    /// be dropped or reordered by the test host — this line is the CI log's only proof that the
+    /// configured load actually ran, so it must not depend on any of that.
+    /// </summary>
+    private static void Emit(string line)
+    {
+        try
+        {
+            var bytes = Encoding.UTF8.GetBytes(line + Environment.NewLine);
+            lock (StdOut)
+            {
+                StdOut.Write(bytes, 0, bytes.Length);
+                StdOut.Flush();
+            }
+        }
+        catch (Exception)
+        {
+            // A redirected/closed handle must never take the hammer down.
+            Console.WriteLine(line);
         }
     }
 

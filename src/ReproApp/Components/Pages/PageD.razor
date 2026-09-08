@@ -1,0 +1,28 @@
+@page "/page-d"
+
+@* The PRE-HOIST shape the issue names: a PageTitle inside a data branch. The first pass
+   renders the loading branch, the continuation flips the branch, and the first PageTitle
+   component is DISPOSED and a new one REGISTERED for the same HeadOutlet section inside a
+   single static-SSR render — two registrations, one disposal, while the walk is in flight.
+   `Task.Yield` guarantees the loading branch really renders first. *@
+@if (_data is null)
+{
+    <PageTitle>Loading...</PageTitle>
+    <p>Loading...</p>
+}
+else
+{
+    <PageTitle>Page D @_data</PageTitle>
+    <h1>Page D</h1>
+}
+
+@code {
+    private string? _data;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Task.Yield();
+        await Task.Delay(Random.Shared.Next(0, 3));
+        _data = "loaded";
+    }
+}

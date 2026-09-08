@@ -35,4 +35,31 @@ public sealed class TreeShapeTests : IClassFixture<WebApplicationFactory<Program
         Assert.Contains("Blazor:", html); // the SSRRenderModeBoundary marker comment
         Assert.DoesNotContain("Interactive Server, prerender:false", html);
     }
+
+    [Fact]
+    public async Task Page_c_registers_its_section_on_the_streamed_pass()
+    {
+        using var client = _factory.CreateClient();
+        var html = await client.GetStringAsync("/page-c", TestContext.Current.CancellationToken);
+
+        // The first walk emitted the loading branch under the layout's title...
+        Assert.Contains("<title>Repro</title>", html);
+        Assert.Contains("Loading...", html);
+        // ...and the section registration arrived in a streamed update after the await.
+        Assert.Contains("blazor-ssr", html);
+        Assert.Contains("Streamed, PageTitle registered after the await.", html);
+    }
+
+    [Fact]
+    public async Task Page_d_disposes_and_re_registers_its_section_within_one_render()
+    {
+        using var client = _factory.CreateClient();
+        var html = await client.GetStringAsync("/page-d", TestContext.Current.CancellationToken);
+
+        // The loading branch's PageTitle was disposed and replaced by the loaded branch's
+        // before the response was written: the final document carries only the second one.
+        Assert.Contains("<title>Page D loaded</title>", html);
+        Assert.DoesNotContain("<title>Loading...</title>", html);
+        Assert.DoesNotContain("<title>Repro</title>", html);
+    }
 }

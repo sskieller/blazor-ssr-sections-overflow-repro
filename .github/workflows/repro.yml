@@ -6,19 +6,32 @@ on:
 
 jobs:
   hammer:
-    name: shard ${{ matrix.shard }}
+    name: shard ${{ matrix.shard }} (cpus ${{ matrix.cpus }})
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     strategy:
       fail-fast: false
+      # Shards 1-5 run on two cores (the shape the crash was observed on); shards 6-10 run on a
+      # SINGLE core, which maximises preemption inside EndpointHtmlRenderer's synchronous walk.
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        include:
+          - { shard: 1, cpus: "0,1" }
+          - { shard: 2, cpus: "0,1" }
+          - { shard: 3, cpus: "0,1" }
+          - { shard: 4, cpus: "0,1" }
+          - { shard: 5, cpus: "0,1" }
+          - { shard: 6, cpus: "0" }
+          - { shard: 7, cpus: "0" }
+          - { shard: 8, cpus: "0" }
+          - { shard: 9, cpus: "0" }
+          - { shard: 10, cpus: "0" }
     env:
       DOTNET_NOLOGO: "1"
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
-      REPRO_ROUNDS: "5"
-      REPRO_ITERATIONS: "2000"
-      REPRO_PARALLELISM: "8"
+      REPRO_ROUNDS: "10"
+      REPRO_ITERATIONS: "5000"
+      REPRO_PARALLELISM: "16"
+      REPRO_CPUS: ${{ matrix.cpus }}
     steps:
       - uses: actions/checkout@v4
 
@@ -88,7 +101,9 @@ jobs:
             echo "### shard ${{ matrix.shard }}: not reproduced (exit ${{ steps.repro.outputs.exit_code }})" >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "rounds=\`$REPRO_ROUNDS\` iterations=\`$REPRO_ITERATIONS\` parallelism=\`$REPRO_PARALLELISM\` cores=\`$(nproc)\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "rounds=\`$REPRO_ROUNDS\` iterations=\`$REPRO_ITERATIONS\` parallelism=\`$REPRO_PARALLELISM\` taskset=\`$REPRO_CPUS\` runner_cores=\`$(nproc)\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "requests per round: \`$((REPRO_ITERATIONS * 5))\` across 5 routes" >> "$GITHUB_STEP_SUMMARY"
 
       # Fail the job when it reproduced, so a hit is visible straight from the run list.
       - name: Fail the shard when reproduced

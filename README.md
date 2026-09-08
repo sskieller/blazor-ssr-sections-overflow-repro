@@ -37,19 +37,41 @@ The structure — and only the structure — of the app the crash was observed i
 | `src/ReproApp/Components/Pages/Home.razor` | `/` — static SSR, no `PageTitle` of its own (the layout's wins). |
 | `src/ReproApp/Components/Pages/PageA.razor` | `/page-a` — static SSR **with its own `PageTitle`**: a second registration for the same `HeadOutlet` section, replacing the layout's while the HTML walk runs. |
 | `src/ReproApp/Components/Pages/PageB.razor` | `/page-b` — `@rendermode @(new InteractiveServerRenderMode(prerender: false))` and **no `PageTitle`**: an `SSRRenderModeBoundary` that emits no page markup on the static pass. Dump 2's tree. |
+| `src/ReproApp/Components/Pages/PageC.razor` | `/page-c` — `@attribute [StreamRendering]`, an awaited randomised `Task.Delay(1..5 ms)`, and its `PageTitle` rendered **only after the await**, inside the loaded branch. The first walk emits no section registration at all; the registration lands on the streamed second walk. |
+| `src/ReproApp/Components/Pages/PageD.razor` | `/page-d` — the **pre-hoist shape** the issue names: a `PageTitle` inside a data branch. The loading branch registers one, the continuation flips the `@if`, and that first `PageTitle` component is *disposed* while a second is *registered* for the same section inside a single static-SSR render. |
 | `src/ReproApp/Components/Pages/NotFound.razor` | `/not-found`, wired through `UseStatusCodePagesWithReExecute`. |
 | `src/ReproApp/AnonymousAuthenticationStateProvider.cs` | The only concession to `AuthorizeRouteView`: `AddAuthorizationCore()` + `AddCascadingAuthenticationState()` + a provider that always returns an anonymous principal. `AuthorizeRouteView` is kept because `AuthorizeRouteViewCore` and its two `CascadingValue`s are inside the crashing component-id cycle. |
 
 No auth, no database, no styling, no third-party packages. `tests/ReproApp.Tests/TreeShapeTests.cs`
-asserts the tree really behaves as described (`/page-a` renders `<title>Page A</title>` — the page
-replaced the layout's section content; `/page-b` renders `<title>Repro</title>` and a render-mode
-boundary comment with no page markup).
+asserts the tree really behaves as described, so a green hammer run cannot be green because the app
+quietly stopped doing the interesting thing:
+
+* `/page-a` renders `<title>Page A</title>` — the page replaced the layout's section content;
+* `/page-b` renders `<title>Repro</title>`, a render-mode boundary comment and no page markup;
+* `/page-c` renders the layout's title plus a `blazor-ssr` streamed update carrying the late
+  registration;
+* `/page-d` renders `<title>Page D loaded</title>` and never `<title>Loading...</title>` — the first
+  `PageTitle` really was disposed and replaced within the one render.
 
 ## The driver
 
 `tests/ReproApp.Tests/StaticSsrHammerTests.cs` runs a `WebApplicationFactory<Program>` in-memory
-host and fires `REPRO_ITERATIONS` × {`/`, `/page-a`, `/page-b`} requests through one `HttpClient`
-with at most `REPRO_PARALLELISM` in flight, via `Task.WhenAll`, asserting 200 and a non-empty body.
+host and fires `REPRO_ITERATIONS` × {`/`, `/page-a`, `/page-b`, `/page-c`, `/page-d`} requests
+through one `HttpClient` with at most `REPRO_PARALLELISM` in flight, via `Task.WhenAll`, asserting
+200 and a non-empty body.
+
+It prints its own effective configuration and result straight to the process's standard output
+handle (bypassing the runner's `Console.Out` capture), so the CI log proves the load that actually
+ran rather than the load the workflow intended:
+
+```
+HAMMER config: REPRO_ITERATIONS=5000 (env "5000") REPRO_PARALLELISM=16 (env "16") routes=5 (/ /page-a /page-b /page-c /page-d) total_requests=25000 processors=20
+HAMMER done: requests=25000/25000 failures=0 wall=3.83s rate=6522 req/s
+```
+
+That rate is the reason rounds look suspiciously quick: the host is in-memory, with no sockets and
+no TLS, so tens of thousands of renders cost seconds, not minutes. A four-second round is a full
+round, not a skipped one — check the `HAMMER` lines rather than the clock.
 
 The suite is **xUnit v3**, built as its own executable on purpose: a stack overflow can never be
 observed as a failed assertion — the runtime aborts the process. Running the test assembly
@@ -70,7 +92,8 @@ Environment knobs (all optional):
 | `REPRO_ROUNDS` | `5` | How many times to run the suite. |
 | `REPRO_ITERATIONS` | `300` | Requests per route per round. |
 | `REPRO_PARALLELISM` | `8` | Concurrent in-flight requests. |
-| `REPRO_NO_TASKSET` | unset | Set to `1` to skip pinning to cores 0,1. |
+| `REPRO_CPUS` | `0,1` | `taskset` cpu list to pin each round to. `0` = single core. |
+| `REPRO_NO_TASKSET` | unset | Set to `1` to skip pinning altogether. |
 | `REPRO_CONFIGURATION` | `Release` | Build configuration. |
 
 `repro.sh` runs every round under the crash trap
@@ -100,7 +123,10 @@ needs on the .NET 10 SDK. It deliberately does **not** pin an SDK version.
 ## Running it in CI
 
 `.github/workflows/repro.yml` runs on every push and on `workflow_dispatch`. It fans out **10
-`ubuntu-latest` shards**, each running `repro.sh` for 5 rounds of 2,000 iterations per route.
+`ubuntu-latest` shards**, each running `repro.sh` for **10 rounds of 5,000 iterations per route at
+parallelism 16** (25,000 requests per round, 250,000 per shard). Shards 1–5 run under
+`taskset -c 0,1` — the two-core shape the crash was observed on; shards 6–10 run under
+`taskset -c 0`, a single core, which maximises preemption inside the synchronous walk.
 Each shard installs `dotnet-dump`, and when a dump exists runs
 
 ```bash
@@ -116,14 +142,16 @@ attempt".
 
 Fill in as runs land.
 
-| Date | Runner | Shards | Rounds × iterations | Hits | Hit rate | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| | `ubuntu-latest` (2 vCPU) | 10 | 5 × 2000 | | | |
+| Run | Date | Runner | Shards | Rounds × iterations × routes | Requests | Hits | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| [34289519005](https://github.com/sskieller/blazor-ssr-sections-overflow-repro/actions/runs/34289519005) | 2026-09-09 | `ubuntu-latest` (2 vCPU), `taskset -c 0,1` | 10 | 5 × 2000 × 3 | 300,000 | **0** | All 10 shards green, every round exit 0. Rounds took ~4 s each, which is a *complete* round at ~1,500 req/s in-memory — not a skipped one. Routes were `/`, `/page-a`, `/page-b` only; no streaming page and no PageTitle-in-a-data-branch page yet. |
+| _(url filled in below)_ | 2026-09-09 | `ubuntu-latest` (2 vCPU), shards 1–5 `taskset -c 0,1`, shards 6–10 `taskset -c 0` | 10 | 10 × 5000 × 5 | 2,500,000 | *pending* | Adds `/page-c` (streaming, late registration) and `/page-d` (PageTitle inside a flipping data branch), single-core half, parallelism 16. |
 
-Local Windows control run (author's box, 2026-09-09, .NET SDK 10.0.302 / runtime 10.0.10, many
-cores): `dotnet build` clean (0 warnings, 0 errors), `REPRO_ITERATIONS=50 dotnet test -c Release`
-— 3 tests, 0 failures, exit 0; `REPRO_ROUNDS=1 REPRO_ITERATIONS=50 ./repro.sh` — round exit 0, no
-dumps, `NOT REPRODUCED`. Expected: this has never reproduced on Windows or on a many-core box.
+Local Windows control run (author's box, 2026-09-09, .NET SDK 10.0.302 / runtime 10.0.10, 20
+cores): `dotnet build` clean (0 warnings, 0 errors); `REPRO_ITERATIONS=50 dotnet test -c Release`
+— 5 tests, 0 failures, exit 0; `REPRO_ITERATIONS=5000 REPRO_PARALLELISM=16` — 25,000/25,000
+requests, 0 failures, 3.83 s, exit 0. Expected: this has never reproduced on Windows or on a
+many-core box.
 
 ## About the dumps
 

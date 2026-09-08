@@ -9,7 +9,8 @@
 #   REPRO_ROUNDS       how many times to run the suite          (default 5)
 #   REPRO_ITERATIONS   requests per route per round             (default 300)
 #   REPRO_PARALLELISM  concurrent in-flight requests            (default 8)
-#   REPRO_NO_TASKSET   set to 1 to skip pinning to two cores
+#   REPRO_CPUS         taskset cpu list to pin to               (default 0,1)
+#   REPRO_NO_TASKSET   set to 1 to skip pinning altogether
 #
 # Dumps land in /tmp/repro-<pid>.dmp (heap included) so the cycling component ids and the
 # disposed SectionOutletContentRenderer are inspectable with dotnet-dump.
@@ -19,6 +20,7 @@ ROUNDS="${REPRO_ROUNDS:-5}"
 ITERATIONS="${REPRO_ITERATIONS:-300}"
 PARALLELISM="${REPRO_PARALLELISM:-8}"
 CONFIGURATION="${REPRO_CONFIGURATION:-Release}"
+CPUS="${REPRO_CPUS:-0,1}"
 
 cd "$(dirname "$0")"
 
@@ -34,13 +36,15 @@ export DOTNET_DbgMiniDumpName=/tmp/repro-%p.dmp
 # Pin to two cores when taskset is available so a fat local machine behaves like the runner.
 PIN=()
 if [[ "${REPRO_NO_TASKSET:-0}" != "1" ]] && command -v taskset >/dev/null 2>&1; then
-  PIN=(taskset -c 0,1)
-  echo "== pinning to cores 0,1 with taskset"
+  PIN=(taskset -c "$CPUS")
+  echo "== pinning to cpu list \"$CPUS\" with taskset"
 else
   echo "== taskset unavailable or disabled; running unpinned (the bug is far less likely)"
 fi
 
-echo "== rounds=$ROUNDS iterations=$ITERATIONS parallelism=$PARALLELISM configuration=$CONFIGURATION"
+echo "== rounds=$ROUNDS iterations=$ITERATIONS parallelism=$PARALLELISM cpus=$CPUS configuration=$CONFIGURATION"
+echo "== each round issues $((ITERATIONS * 5)) requests across 5 routes; the hammer prints its own"
+echo "== effective config and wall time, so the log proves the load that actually ran."
 
 dotnet build -c "$CONFIGURATION" || exit $?
 
