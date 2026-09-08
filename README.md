@@ -145,7 +145,7 @@ Fill in as runs land.
 | Run | Date | Runner | Shards | Rounds × iterations × routes | Requests | Hits | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | [34289519005](https://github.com/sskieller/blazor-ssr-sections-overflow-repro/actions/runs/34289519005) | 2026-09-09 | `ubuntu-latest` (2 vCPU), `taskset -c 0,1` | 10 | 5 × 2000 × 3 | 300,000 | **0** | All 10 shards green, every round exit 0. Rounds took ~4 s each, which is a *complete* round at ~1,500 req/s in-memory — not a skipped one. Routes were `/`, `/page-a`, `/page-b` only; no streaming page and no PageTitle-in-a-data-branch page yet. |
-| _(url filled in below)_ | 2026-09-09 | `ubuntu-latest` (2 vCPU), shards 1–5 `taskset -c 0,1`, shards 6–10 `taskset -c 0` | 10 | 10 × 5000 × 5 | 2,500,000 | *pending* | Adds `/page-c` (streaming, late registration) and `/page-d` (PageTitle inside a flipping data branch), single-core half, parallelism 16. |
+| [34290063356](https://github.com/sskieller/blazor-ssr-sections-overflow-repro/actions/runs/34290063356) | 2026-09-09 | `ubuntu-latest` (2 vCPU), shards 1–5 `taskset -c 0,1`, shards 6–10 `taskset -c 0` | 10 | 10 × 5000 × 5 | 2,500,000 | *pending* | Adds `/page-c` (streaming, late registration) and `/page-d` (PageTitle inside a flipping data branch), single-core half, parallelism 16. |
 
 Local Windows control run (author's box, 2026-09-09, .NET SDK 10.0.302 / runtime 10.0.10, 20
 cores): `dotnet build` clean (0 warnings, 0 errors); `REPRO_ITERATIONS=50 dotnet test -c Release`
