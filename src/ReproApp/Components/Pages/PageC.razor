@@ -4,7 +4,7 @@
 @* Streaming SSR: the FIRST walk emits the loading branch with no PageTitle at all, and the
    section registration lands on the SECOND (streamed) walk, after the await. That is the
    narrowest window between "a section registration happens" and "WriteComponentHtml is
-   walking" that a page can create. The delay is randomised so the registration lands at a
+   walking" that a page can create. The spin is randomised so the registration lands at a
    different point of the walk on every request. *@
 @if (_loaded)
 {
@@ -23,7 +23,7 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        await Task.Delay(Random.Shared.Next(1, 6));
+        await PoolWork.SpinAsync(5).ConfigureAwait(false);
         _loaded = true;
     }
 }

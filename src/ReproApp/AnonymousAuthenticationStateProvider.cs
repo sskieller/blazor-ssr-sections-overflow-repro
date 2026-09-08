@@ -5,18 +5,16 @@ namespace ReproApp;
 
 /// <summary>
 /// The smallest thing that satisfies <c>AuthorizeRouteView</c> without any identity stack —
-/// but a GENUINELY ASYNCHRONOUS one.
+/// but a genuinely asynchronous one that occupies a POOL THREAD, not a timer.
 /// <para>
 /// The crash stack in https://github.com/dotnet/aspnetcore/issues/69035 enters the HTML walk
 /// from <c>WaitForResultReady</c> / <c>WaitForNonStreamingPendingTasks</c> continuations: the
-/// write starts when the renderer's PENDING TASKS complete, and a section registration still
-/// lands during it. A provider returning <c>Task.FromResult</c> produces no pending task at
-/// all, so the renderer never takes that path — which is why the first two CI runs (2.8M
-/// requests) never hit. The real app has cookie Identity, whose
-/// <c>GetAuthenticationStateAsync</c> genuinely awaits, and both dumps' trees run through
-/// <c>AuthorizeRouteView</c>.
+/// write starts when the renderer's pending tasks complete, and a section registration still
+/// lands during it. A provider returning <c>Task.FromResult</c> produces no pending task at all;
+/// one returning <c>Task.Delay</c> produces a pending task that costs the pool nothing. The real
+/// app has cookie Identity, whose <c>GetAuthenticationStateAsync</c> genuinely awaits real work.
 /// </para>
-/// The principal stays anonymous; only the timing is real.
+/// The principal stays anonymous; only the timing and the scheduling are real.
 /// </summary>
 public sealed class AnonymousAuthenticationStateProvider : AuthenticationStateProvider
 {
@@ -25,10 +23,7 @@ public sealed class AnonymousAuthenticationStateProvider : AuthenticationStatePr
 
     public override async Task<AuthenticationState> GetAuthenticationStateAsync()
     {
-        // Task.Yield guarantees the caller really suspends; the randomised delay moves where
-        // the continuation lands relative to the walk on every request.
-        await Task.Yield();
-        await Task.Delay(Random.Shared.Next(0, 4));
+        await PoolWork.SpinAsync(2).ConfigureAwait(false);
         return Anonymous;
     }
 }

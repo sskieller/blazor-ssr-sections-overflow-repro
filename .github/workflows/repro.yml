@@ -6,30 +6,34 @@ on:
 
 jobs:
   hammer:
-    name: shard ${{ matrix.shard }} (cpus ${{ matrix.cpus }})
+    name: shard ${{ matrix.shard }} (cpus ${{ matrix.cpus }}, pool ${{ matrix.pool_max || 'default' }})
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       # Shards 1-5 run on two cores (the shape the crash was observed on); shards 6-10 run on a
       # SINGLE core, which maximises preemption inside EndpointHtmlRenderer's synchronous walk.
+      # Shards 1-5: two cores, default thread pool, high volume.
+      # Shards 6-10: ONE core AND a force-capped thread pool, so the CPU-bound pool work every
+      # component now awaits has to queue. Volume is lower there because that configuration runs
+      # roughly 10x slower - the point of those shards is contention, not throughput.
       matrix:
         include:
-          - { shard: 1, cpus: "0,1" }
-          - { shard: 2, cpus: "0,1" }
-          - { shard: 3, cpus: "0,1" }
-          - { shard: 4, cpus: "0,1" }
-          - { shard: 5, cpus: "0,1" }
-          - { shard: 6, cpus: "0" }
-          - { shard: 7, cpus: "0" }
-          - { shard: 8, cpus: "0" }
-          - { shard: 9, cpus: "0" }
-          - { shard: 10, cpus: "0" }
+          - { shard: 1, cpus: "0,1", iterations: "5000", pool_min: "", pool_max: "" }
+          - { shard: 2, cpus: "0,1", iterations: "5000", pool_min: "", pool_max: "" }
+          - { shard: 3, cpus: "0,1", iterations: "5000", pool_min: "", pool_max: "" }
+          - { shard: 4, cpus: "0,1", iterations: "5000", pool_min: "", pool_max: "" }
+          - { shard: 5, cpus: "0,1", iterations: "5000", pool_min: "", pool_max: "" }
+          - { shard: 6, cpus: "0", iterations: "300", pool_min: "1", pool_max: "8" }
+          - { shard: 7, cpus: "0", iterations: "300", pool_min: "1", pool_max: "8" }
+          - { shard: 8, cpus: "0", iterations: "300", pool_min: "1", pool_max: "8" }
+          - { shard: 9, cpus: "0", iterations: "300", pool_min: "1", pool_max: "8" }
+          - { shard: 10, cpus: "0", iterations: "300", pool_min: "1", pool_max: "8" }
     env:
       DOTNET_NOLOGO: "1"
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       REPRO_ROUNDS: "10"
-      REPRO_ITERATIONS: "5000"
+      REPRO_ITERATIONS: ${{ matrix.iterations }}
       REPRO_PARALLELISM: "16"
       REPRO_CPUS: ${{ matrix.cpus }}
     steps:
@@ -52,8 +56,17 @@ jobs:
       - name: Run the repro
         id: repro
         shell: bash
+        env:
+          POOL_MIN: ${{ matrix.pool_min }}
+          POOL_MAX: ${{ matrix.pool_max }}
         run: |
           set +e
+          # Only the starved shards get the knobs at all, so an unset variable on shards 1-5 is
+          # genuinely unset rather than an empty string the runtime might misparse.
+          if [ -n "${POOL_MIN:-}" ]; then export DOTNET_ThreadPool_ForceMinWorkerThreads="$POOL_MIN"; fi
+          if [ -n "${POOL_MAX:-}" ]; then export DOTNET_ThreadPool_ForceMaxWorkerThreads="$POOL_MAX"; fi
+          echo "== DOTNET_ThreadPool_ForceMinWorkerThreads=${DOTNET_ThreadPool_ForceMinWorkerThreads:-(unset)}"
+          echo "== DOTNET_ThreadPool_ForceMaxWorkerThreads=${DOTNET_ThreadPool_ForceMaxWorkerThreads:-(unset)}"
           ./repro.sh
           rc=$?
           echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
@@ -102,6 +115,8 @@ jobs:
           fi
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "rounds=\`$REPRO_ROUNDS\` iterations=\`$REPRO_ITERATIONS\` parallelism=\`$REPRO_PARALLELISM\` taskset=\`$REPRO_CPUS\` runner_cores=\`$(nproc)\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "thread pool: min=\`${{ matrix.pool_min }}\` max=\`${{ matrix.pool_max }}\` (blank = runtime default)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "requests per round: \`$((REPRO_ITERATIONS * 6))\` across 6 routes" >> "$GITHUB_STEP_SUMMARY"
 

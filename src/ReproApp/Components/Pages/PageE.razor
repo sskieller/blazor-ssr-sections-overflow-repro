@@ -21,7 +21,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await Task.Delay(Random.Shared.Next(1, 6));
+        await PoolWork.SpinAsync(5).ConfigureAwait(false);
         _ready = true;
     }
 }

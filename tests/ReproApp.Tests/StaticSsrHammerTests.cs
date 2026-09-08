@@ -18,6 +18,7 @@ namespace ReproApp.Tests;
 /// SIGABRT (exit 134). A green run here proves nothing except that the host is wired; the
 /// signal is the exit code, which is why repro.sh loops rounds and looks at $?.
 /// </summary>
+[Collection("hammer")]
 public sealed class StaticSsrHammerTests : IClassFixture<WebApplicationFactory<Program>>
 {
     private static readonly string[] Routes = ["/", "/page-a", "/page-b", "/page-c", "/page-d", "/page-e"];
@@ -42,7 +43,10 @@ public sealed class StaticSsrHammerTests : IClassFixture<WebApplicationFactory<P
         Emit($"HAMMER config: REPRO_ITERATIONS={Describe("REPRO_ITERATIONS", iterations)} "
             + $"REPRO_PARALLELISM={Describe("REPRO_PARALLELISM", parallelism)} "
             + $"routes={Routes.Length} ({string.Join(' ', Routes)}) "
-            + $"total_requests={total} processors={Environment.ProcessorCount}");
+            + $"total_requests={total} processors={Environment.ProcessorCount} "
+            + $"ForceMinWorkerThreads={EnvOrUnset("DOTNET_ThreadPool_ForceMinWorkerThreads")} "
+            + $"ForceMaxWorkerThreads={EnvOrUnset("DOTNET_ThreadPool_ForceMaxWorkerThreads")} "
+            + $"pool_min={PoolMin} pool_max={PoolMax}");
 
         using var client = _factory.CreateClient();
         using var gate = new SemaphoreSlim(parallelism, parallelism);
@@ -62,6 +66,7 @@ public sealed class StaticSsrHammerTests : IClassFixture<WebApplicationFactory<P
 
         await Task.WhenAll(work);
         stopwatch.Stop();
+        ReproSignals.SignalHammerFinished();
 
         var done = Volatile.Read(ref completed);
         var perSecond = done / Math.Max(stopwatch.Elapsed.TotalSeconds, 0.001);
@@ -109,6 +114,30 @@ public sealed class StaticSsrHammerTests : IClassFixture<WebApplicationFactory<P
             onCompleted();
             gate.Release();
         }
+    }
+
+    private static string PoolMin
+    {
+        get
+        {
+            ThreadPool.GetMinThreads(out var worker, out var io);
+            return $"{worker}w/{io}io";
+        }
+    }
+
+    private static string PoolMax
+    {
+        get
+        {
+            ThreadPool.GetMaxThreads(out var worker, out var io);
+            return $"{worker}w/{io}io";
+        }
+    }
+
+    private static string EnvOrUnset(string name)
+    {
+        var raw = Environment.GetEnvironmentVariable(name);
+        return string.IsNullOrEmpty(raw) ? "(unset)" : raw;
     }
 
     private static string Describe(string name, int effective)
