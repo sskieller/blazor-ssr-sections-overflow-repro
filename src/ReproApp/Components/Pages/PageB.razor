@@ -1,0 +1,9 @@
+@page "/page-b"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+
+@* Interactive Server with prerender:false and NO PageTitle -> an SSRRenderModeBoundary that
+   emits no page markup on the static pass. That is dump 2's tree exactly: root + HeadOutlet
+   (+ its two SectionOutlets and their content renderers, one disposed) + router/layout chrome
+   + the boundary, with only the layout's PageTitle. *@
+<h1>Page B</h1>
+<p>Interactive Server, prerender:false, no PageTitle.</p>

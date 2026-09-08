@@ -1,0 +1,10 @@
+@inherits LayoutComponentBase
+
+@* Exactly ONE layout-level PageTitle — dump 2's tree had a single layout PageTitle and still
+   raced the walk, so the repro keeps the hoisted-to-the-layout shape rather than the
+   many-swaps shape. *@
+<PageTitle>Repro</PageTitle>
+
+<main>
+    @Body
+</main>

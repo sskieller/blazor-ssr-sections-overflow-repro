@@ -1,0 +1,22 @@
+@* Mirrors the crashing app's router chrome: Router -> AuthorizeRouteView -> LayoutView -> MainLayout.
+   AuthorizeRouteView is kept because both dumps show AuthorizeRouteViewCore + two CascadingValue
+   components inside the componentId cycle (22 -> 21 -> 12 -> 0 -> 22). No real auth is configured:
+   the app registers AddAuthorizationCore + a cascading anonymous AuthenticationStateProvider. *@
+<Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+    <Found Context="routeData">
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+            <NotAuthorized>
+                <LayoutView Layout="typeof(Layout.MainLayout)">
+                    <PageTitle>Not authorized</PageTitle>
+                    <h1>Not authorized</h1>
+                </LayoutView>
+            </NotAuthorized>
+            <Authorizing>
+                <LayoutView Layout="typeof(Layout.MainLayout)">
+                    <p>Authorizing...</p>
+                </LayoutView>
+            </Authorizing>
+        </AuthorizeRouteView>
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>

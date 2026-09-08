@@ -1,0 +1,98 @@
+name: repro
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  hammer:
+    name: shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    env:
+      DOTNET_NOLOGO: "1"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      REPRO_ROUNDS: "5"
+      REPRO_ITERATIONS: "2000"
+      REPRO_PARALLELISM: "8"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Show the machine (the bug only ever appears on 2-core runners)
+        run: |
+          nproc
+          dotnet --info | head -20
+
+      - name: Install dotnet-dump
+        run: |
+          dotnet tool install --global dotnet-dump
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Run the repro
+        id: repro
+        shell: bash
+        run: |
+          set +e
+          ./repro.sh
+          rc=$?
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+          if [ "$rc" -eq 134 ]; then
+            echo "reproduced=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "reproduced=false" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: Analyse the dump
+        if: always()
+        shell: bash
+        run: |
+          shopt -s nullglob
+          dumps=(/tmp/repro-*.dmp)
+          if [ ${#dumps[@]} -eq 0 ]; then
+            echo "No dump on this shard."
+            exit 0
+          fi
+          for d in "${dumps[@]}"; do
+            echo "===================== $d ====================="
+            dotnet-dump analyze "$d" \
+              -c clrstack \
+              -c "dumpheap -type SectionOutletContentRenderer" \
+              -c exit || true
+          done
+
+      - name: Upload dumps
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repro-dumps-shard-${{ matrix.shard }}
+          path: /tmp/repro-*.dmp
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Step summary
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ steps.repro.outputs.reproduced }}" = "true" ]; then
+            echo "### shard ${{ matrix.shard }}: REPRODUCED (exit 134) :boom:" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### shard ${{ matrix.shard }}: not reproduced (exit ${{ steps.repro.outputs.exit_code }})" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "rounds=\`$REPRO_ROUNDS\` iterations=\`$REPRO_ITERATIONS\` parallelism=\`$REPRO_PARALLELISM\` cores=\`$(nproc)\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # Fail the job when it reproduced, so a hit is visible straight from the run list.
+      - name: Fail the shard when reproduced
+        if: steps.repro.outputs.reproduced == 'true'
+        run: |
+          echo "::error::Reproduced dotnet/aspnetcore#69035 — the round exited 134 (SIGABRT / stack overflow)"
+          exit 1
